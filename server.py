@@ -1,20 +1,30 @@
 from flask import Flask, jsonify
-from datetime import datetime, timedelta
-from web3 import Web3, EthereumTesterProvider
+from web3 import Web3
 import requests
+import datetime
+import traceback
+import asyncio
+from hexbytes import HexBytes
+from collections import deque
+import time
+import decimal
+import json
 
 app = Flask(__name__)
 
-# Web3 Configuration
-WEB3_PROVIDER_URL = 'https://prettiest-green-gadget.quiknode.pro/dc58342758f94b6480bdbc080ada992297797e28' 
-web3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER_URL))
-# web3 = Web3(EthereumTesterProvider())
+# Read API Key and web provider URL from config file
+with open('config.json') as f:
+    config = json.load(f)
 
-# Token Contract Information (replace with actual values)
+ETHERSCAN_API_KEY = config['api_key']
+WEB3_PROVIDER_URL = config['web3_provider_url']
+
+web3 = Web3(Web3.HTTPProvider(WEB3_PROVIDER_URL))
+
+# Token Contract Information
 USDC_CONTRACT_ADDRESS = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
 USDT_CONTRACT_ADDRESS = '0xdAC17F958D2ee523a2206206994597C13D831ec7'
-USDC_ABI = [{'constant': False, 'inputs': [{'name': 'newImplementation', 'type': 'address'}], 'name': 'upgradeTo', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': False, 'inputs': [{'name': 'newImplementation', 'type': 'address'}, {'name': 'data', 'type': 'bytes'}], 'name': 'upgradeToAndCall', 'outputs': [], 'payable': True, 'stateMutability': 'payable', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'implementation', 'outputs': [{'name': '', 'type': 'address'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': False, 'inputs': [{'name': 'newAdmin', 'type': 'address'}], 'name': 'changeAdmin', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'admin', 'outputs': [{'name': '', 'type': 'address'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'inputs': [{'name': '_implementation', 'type': 'address'}], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'constructor'}, {'payable': True, 'stateMutability': 'payable', 'type': 'fallback'}, {'anonymous': False, 'inputs': [{'indexed': False, 'name': 'previousAdmin', 'type': 'address'}, {'indexed': False, 'name': 'newAdmin', 'type': 'address'}], 'name': 'AdminChanged', 'type': 'event'}, {'anonymous': False, 'inputs': [{'indexed': False, 'name': 'implementation', 'type': 'address'}], 'name': 'Upgraded', 'type': 'event'}]
-USDT_ABI = [{'constant': True, 'inputs': [], 'name': 'name', 'outputs': [{'name': '', 'type': 'string'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': False, 'inputs': [{'name': '_upgradedAddress', 'type': 'address'}], 'name': 'deprecate', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': False, 'inputs': [{'name': '_spender', 'type': 'address'}, {'name': '_value', 'type': 'uint256'}], 'name': 'approve', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'deprecated', 'outputs': [{'name': '', 'type': 'bool'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': False, 'inputs': [{'name': '_evilUser', 'type': 'address'}], 'name': 'addBlackList', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'totalSupply', 'outputs': [{'name': '', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': False, 'inputs': [{'name': '_from', 'type': 'address'}, {'name': '_to', 'type': 'address'}, {'name': '_value', 'type': 'uint256'}], 'name': 'transferFrom', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'upgradedAddress', 'outputs': [{'name': '', 'type': 'address'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [{'name': '', 'type': 'address'}], 'name': 'balances', 'outputs': [{'name': '', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'decimals', 'outputs': [{'name': '', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'maximumFee', 'outputs': [{'name': '', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': '_totalSupply', 'outputs': [{'name': '', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': False, 'inputs': [], 'name': 'unpause', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': True, 'inputs': [{'name': '_maker', 'type': 'address'}], 'name': 'getBlackListStatus', 'outputs': [{'name': '', 'type': 'bool'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [{'name': '', 'type': 'address'}, {'name': '', 'type': 'address'}], 'name': 'allowed', 'outputs': [{'name': '', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'paused', 'outputs': [{'name': '', 'type': 'bool'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [{'name': 'who', 'type': 'address'}], 'name': 'balanceOf', 'outputs': [{'name': '', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': False, 'inputs': [], 'name': 'pause', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'getOwner', 'outputs': [{'name': '', 'type': 'address'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'owner', 'outputs': [{'name': '', 'type': 'address'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'symbol', 'outputs': [{'name': '', 'type': 'string'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': False, 'inputs': [{'name': '_to', 'type': 'address'}, {'name': '_value', 'type': 'uint256'}], 'name': 'transfer', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': False, 'inputs': [{'name': 'newBasisPoints', 'type': 'uint256'}, {'name': 'newMaxFee', 'type': 'uint256'}], 'name': 'setParams', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': False, 'inputs': [{'name': 'amount', 'type': 'uint256'}], 'name': 'issue', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': False, 'inputs': [{'name': 'amount', 'type': 'uint256'}], 'name': 'redeem', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': True, 'inputs': [{'name': '_owner', 'type': 'address'}, {'name': '_spender', 'type': 'address'}], 'name': 'allowance', 'outputs': [{'name': 'remaining', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'basisPointsRate', 'outputs': [{'name': '', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': True, 'inputs': [{'name': '', 'type': 'address'}], 'name': 'isBlackListed', 'outputs': [{'name': '', 'type': 'bool'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': False, 'inputs': [{'name': '_clearedUser', 'type': 'address'}], 'name': 'removeBlackList', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': True, 'inputs': [], 'name': 'MAX_UINT', 'outputs': [{'name': '', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'view', 'type': 'function'}, {'constant': False, 'inputs': [{'name': 'newOwner', 'type': 'address'}], 'name': 'transferOwnership', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'constant': False, 'inputs': [{'name': '_blackListedUser', 'type': 'address'}], 'name': 'destroyBlackFunds', 'outputs': [], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'function'}, {'inputs': [{'name': '_initialSupply', 'type': 'uint256'}, {'name': '_name', 'type': 'string'}, {'name': '_symbol', 'type': 'string'}, {'name': '_decimals', 'type': 'uint256'}], 'payable': False, 'stateMutability': 'nonpayable', 'type': 'constructor'}, {'anonymous': False, 'inputs': [{'indexed': False, 'name': 'amount', 'type': 'uint256'}], 'name': 'Issue', 'type': 'event'}, {'anonymous': False, 'inputs': [{'indexed': False, 'name': 'amount', 'type': 'uint256'}], 'name': 'Redeem', 'type': 'event'}, {'anonymous': False, 'inputs': [{'indexed': False, 'name': 'newAddress', 'type': 'address'}], 'name': 'Deprecate', 'type': 'event'}, {'anonymous': False, 'inputs': [{'indexed': False, 'name': 'feeBasisPoints', 'type': 'uint256'}, {'indexed': False, 'name': 'maxFee', 'type': 'uint256'}], 'name': 'Params', 'type': 'event'}, {'anonymous': False, 'inputs': [{'indexed': False, 'name': '_blackListedUser', 'type': 'address'}, {'indexed': False, 'name': '_balance', 'type': 'uint256'}], 'name': 'DestroyedBlackFunds', 'type': 'event'}, {'anonymous': False, 'inputs': [{'indexed': False, 'name': '_user', 'type': 'address'}], 'name': 'AddedBlackList', 'type': 'event'}, {'anonymous': False, 'inputs': [{'indexed': False, 'name': '_user', 'type': 'address'}], 'name': 'RemovedBlackList', 'type': 'event'}, {'anonymous': False, 'inputs': [{'indexed': True, 'name': 'owner', 'type': 'address'}, {'indexed': True, 'name': 'spender', 'type': 'address'}, {'indexed': False, 'name': 'value', 'type': 'uint256'}], 'name': 'Approval', 'type': 'event'}, {'anonymous': False, 'inputs': [{'indexed': True, 'name': 'from', 'type': 'address'}, {'indexed': True, 'name': 'to', 'type': 'address'}, {'indexed': False, 'name': 'value', 'type': 'uint256'}], 'name': 'Transfer', 'type': 'event'}, {'anonymous': False, 'inputs': [], 'name': 'Pause', 'type': 'event'}, {'anonymous': False, 'inputs': [], 'name': 'Unpause', 'type': 'event'}]
+
 MIN_ABI = [{
         "constant": True,
         "inputs": [
@@ -33,32 +43,221 @@ MIN_ABI = [{
         "payable": False,
         "stateMutability": "view",
         "type": "function"
+    }, {
+        "anonymous": False,
+        "inputs": [
+            {
+                "indexed": True,
+                "name": "from",
+                "type": "address"
+            },
+            {
+                "indexed": True,
+                "name": "to",
+                "type": "address"
+            },
+            {
+                "indexed": False,
+                "name": "value",
+                "type": "uint256"
+            }
+        ],
+        "name": "Transfer",
+        "type": "event"
     },]
 
 usdc_contract = web3.eth.contract(address=USDC_CONTRACT_ADDRESS, abi=MIN_ABI)
 usdt_contract = web3.eth.contract(address=USDT_CONTRACT_ADDRESS, abi=MIN_ABI)
 
+def round_up_to_6_digits(number):
+    """
+    Rounds a number up to 6 digits after the decimal point.
+    """
+    return decimal.Decimal(number).quantize(decimal.Decimal('1E-6'), rounding=decimal.ROUND_HALF_UP)
+
+async def rate_limited_queue(queue, max_requests_per_second=5):
+    """
+    A rate-limited queue that ensures a maximum number of requests per second.
+
+    Args:
+        queue: The queue to process.
+        max_requests_per_second: The maximum number of requests allowed per second.
+
+    Yields:
+        Items from the queue, respecting the rate limit.
+    """
+    last_request_time = time.monotonic()
+    while True:
+        if queue:
+            # Check if we've exceeded the rate limit
+            if time.monotonic() - last_request_time < 1 / max_requests_per_second:
+                await asyncio.sleep(1 / max_requests_per_second - (time.monotonic() - last_request_time))
+
+            item = queue.popleft()
+            last_request_time = time.monotonic()
+            yield item
+        else:
+            await asyncio.sleep(0.1)  # Wait briefly if the queue is empty
+
+async def _get_eth_transfers(wallet, start_block, end_block):
+    """
+    Fetches ETH transfers from/to a given wallet address.
+    We will iterate through the chain from start_block to end_block
+    to collect transaction info.
+
+    Deprecated because iterating the chain by ourselves is extremly slow.
+    """
+    transfers = []
+    transactions = []
+    try:
+        request_queue = deque()
+
+        for block_number in range(start_block, end_block + 1):
+            print(block_number)
+            block = web3.eth.get_block(block_number)
+            transaction_hashes = block['transactions']
+        
+            for tx_hash in transaction_hashes:
+                request_queue.append(tx_hash)
+
+        # Use a rate limited queue to meet the API rate limit of 40/sec
+        async for tx_hash in rate_limited_queue(request_queue, max_requests_per_second=40):
+            transaction = web3.eth.get_transaction(tx_hash)
+            transactions.append(transaction)
+
+        for tx in transactions:
+            if tx['to'] == wallet or tx['from'] == wallet:
+                transfers.append({
+                    'amount': web3.fromWei(tx['value'], 'ether'),
+                    'timestamp': datetime.fromtimestamp(block['timestamp'])
+                })
+
+        return transfers
+
+    except Exception as e:
+        raise e
+
+def get_eth_transfers(wallet, start_block, end_block):
+    """
+    Fetches ETH transfers from/to a given wallet address.
+    A warpper of Etherscan API.
+    """
+    try:
+        etherscan_url = f"https://api.etherscan.io/api?module=account&action=txlist&address={wallet}&startblock={start_block}&endblock={end_block}&page=1&offset=10&sort=asc&apikey={ETHERSCAN_API_KEY}"
+        response = requests.get(etherscan_url)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        transactions = response.json()['result']
+        return transactions
+
+    # Let the outer function handle the exception
+    except Exception as e:
+        raise e
+
+# --- Helper Functions ---
+def get_token_transfers(contract_address, wallet, start_block, end_block):
+    """
+    Fetches transfer events for a given token contract and wallet address,
+    considering both incoming and outgoing transfers.
+    """
+    contract = web3.eth.contract(address=contract_address, abi=MIN_ABI)
+    
+    outgoing = contract.events.Transfer.create_filter(
+        from_block=start_block,
+        to_block=end_block,
+        argument_filters={'from': wallet}
+    ).get_all_entries()
+
+    incoming = contract.events.Transfer.create_filter(
+        from_block=start_block,
+        to_block=end_block,
+        argument_filters={'to': wallet}
+    ).get_all_entries()
+
+    result = outgoing + incoming
+    return result
+
+def calculate_total_volume(wallet, start_block, end_block):
+    """
+    Calculates the total transfer volume for USDC, USDT, and ETH in the given block window.
+
+    Here we are calculating the Gross Transfer Volume, which measures the total amount of
+    tokens moved through the wallet, regardless of whether it's sending or receiving.
+    """
+    # Fetch transfer events for USDC, USDT, and ETH
+    usdc_transfers = get_token_transfers(USDC_CONTRACT_ADDRESS, wallet, start_block, end_block)
+    usdt_transfers = get_token_transfers(USDT_CONTRACT_ADDRESS, wallet, start_block, end_block)
+    eth_transfers = get_eth_transfers(wallet, start_block, end_block)
+
+    print(usdc_transfers, usdt_transfers)
+
+    # Calculate total volume for each token
+    total_usdc = sum([transfer['args']['value'] / 1e6 for transfer in usdc_transfers])
+    total_usdt = sum([transfer['args']['value'] / 1e6 for transfer in usdt_transfers])
+    total_eth = sum([int(transfer['value']) for transfer in eth_transfers])
+
+    # Convert Wei to ether, round up the result
+    total_usdc = str(round_up_to_6_digits(total_usdc))
+    total_usdt = str(round_up_to_6_digits(total_usdt))
+    total_eth = str(round_up_to_6_digits(Web3.from_wei(total_eth, 'ether')))
+
+    return {
+        'USDC': total_usdc,
+        'USDT': total_usdt,
+        'ETH': total_eth
+    }
+
 # --- Flask API Endpoints ---
 
 @app.route('/api/v1/wallet/<address>/balances')
 def get_wallet_balances(address):
-    """Retrieves ETH, USDC, and USDT balances for a given address."""
+    """
+    Retrieves ETH, USDC, and USDT balances for a given address.
+    """
     try:
         eth_balance_wei = web3.eth.get_balance(address)
-        eth_balance_ether = Web3.from_wei(eth_balance_wei, 'ether')
-        usdc_balance = str(usdc_contract.functions.balanceOf(address).call() / 10**6)
-        usdt_balance = str(usdt_contract.functions.balanceOf(address).call() / 10**6)
+        eth_balance_ether = str(round_up_to_6_digits(Web3.from_wei(eth_balance_wei, 'ether')))
+        usdc_balance = str(round_up_to_6_digits(usdc_contract.functions.balanceOf(address).call() / 1e6))
+        usdt_balance = str(round_up_to_6_digits(usdt_contract.functions.balanceOf(address).call() / 1e6))
         
-        return jsonify({
-            'address': address,
-            'balance': {
-                'ETH': eth_balance_ether,
-                'USDC': usdc_balance,
-                'USDT': usdt_balance 
-            },
-        })
+        result = {
+            'ETH': eth_balance_ether,
+            'USDC': usdc_balance,
+            'USDT': usdt_balance 
+        }
+
+        return jsonify(result)
+
     except Exception as e:
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
-if __name__ == '__main__':
+@app.route('/api/v1/wallet/<address>/volumes')
+async def get_wallet_volumes(address):
+    """
+    Calculates the 24-hour transfer volume for a given address.
+    """
+    try:
+        now = datetime.datetime.now(datetime.UTC)
+        twenty_four_hours_ago = now - datetime.timedelta(hours=24)
+
+        # Get start block number by timestamp, using Etherscan API
+        etherscan_url = f"https://api.etherscan.io/api?module=block&action=getblocknobytime&timestamp={int(twenty_four_hours_ago.timestamp())}&closest=before&apikey={ETHERSCAN_API_KEY}"
+        response = requests.get(etherscan_url)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+
+        start_block = int(response.json()['result'])
+        end_block = web3.eth.block_number
+
+        result = calculate_total_volume(address, start_block, end_block)
+
+        return jsonify(result)
+        
+    except Exception as e:
+        print(traceback.format_exc())
+        return jsonify({'error': str(e)}), 500
+
+async def main():
     app.run(debug=True, host="0.0.0.0")
+
+if __name__ == '__main__':
+    asyncio.run(main())
